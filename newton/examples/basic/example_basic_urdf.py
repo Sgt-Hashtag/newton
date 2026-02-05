@@ -60,7 +60,7 @@ class Example:
 
         # parse the URDF file
         quadruped.add_urdf(
-            newton.examples.get_asset("quadruped.urdf"),
+            newton.examples.get_asset("a1_description/urdf/robot_newton.urdf"),
             xform=wp.transform(wp.vec3(0.0, 0.0, 0.7), wp.quat_identity()),
             floating=True,
             enable_self_collisions=False,
@@ -102,6 +102,8 @@ class Example:
         self.contacts = self.model.collide(self.state_0, collision_pipeline=self.collision_pipeline)
 
         self.viewer.set_model(self.model)
+        self.simulate()
+        wp.synchronize()
 
         # put graph capture into it's own function
         self.capture()
