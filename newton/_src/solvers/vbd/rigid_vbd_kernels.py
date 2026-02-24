@@ -747,8 +747,8 @@ def evaluate_body_particle_contact(
         body_contact_force = n * body_contact_force_norm
         body_contact_hessian = body_particle_contact_ke * wp.outer(n, n)
 
-        # Use the larger of body-particle friction and shape material friction
-        mu = wp.max(friction_mu, shape_material_mu[shape_index])
+        # Combine body-particle friction and shape material friction using geometric mean.
+        mu = wp.sqrt(friction_mu * shape_material_mu[shape_index])
 
         dx = particle_pos - particle_prev_pos
 
@@ -1054,7 +1054,7 @@ def evaluate_joint_force_hessian(
 # Utility kernels
 # -----------------------------
 @wp.kernel
-def count_num_adjacent_joints(
+def _count_num_adjacent_joints(
     joint_parent: wp.array(dtype=wp.int32),
     joint_child: wp.array(dtype=wp.int32),
     num_body_adjacent_joints: wp.array(dtype=wp.int32),
@@ -1072,7 +1072,7 @@ def count_num_adjacent_joints(
 
 
 @wp.kernel
-def fill_adjacent_joints(
+def _fill_adjacent_joints(
     joint_parent: wp.array(dtype=wp.int32),
     joint_child: wp.array(dtype=wp.int32),
     body_adjacent_joints_offsets: wp.array(dtype=wp.int32),

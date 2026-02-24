@@ -13,23 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 import warp as wp
 
 from . import lighting, ray_cast, textures
 from .types import RenderOrder
 
-if TYPE_CHECKING:
-    from .render_context import RenderContext
-
 
 @wp.func
 def tid_to_coord_tiled(
     tid: wp.int32,
-    num_cameras: wp.int32,
+    camera_count: wp.int32,
     width: wp.int32,
     height: wp.int32,
     tile_width: wp.int32,
@@ -42,8 +35,8 @@ def tid_to_coord_tiled(
     pixel_idx = tid % num_pixels_per_view
     view_idx = tid // num_pixels_per_view
 
-    world_index = view_idx // num_cameras
-    camera_index = view_idx % num_cameras
+    world_index = view_idx // camera_count
+    camera_index = view_idx % camera_count
 
     tile_idx = pixel_idx // num_pixels_per_tile
     tile_pixel_idx = pixel_idx % num_pixels_per_tile
@@ -58,14 +51,14 @@ def tid_to_coord_tiled(
 
 
 @wp.func
-def tid_to_coord_pixel_priority(tid: wp.int32, num_worlds: wp.int32, num_cameras: wp.int32, width: wp.int32):
-    num_views_per_pixel = num_worlds * num_cameras
+def tid_to_coord_pixel_priority(tid: wp.int32, world_count: wp.int32, camera_count: wp.int32, width: wp.int32):
+    num_views_per_pixel = world_count * camera_count
 
     pixel_idx = tid // num_views_per_pixel
     view_idx = tid % num_views_per_pixel
 
-    world_index = view_idx % num_worlds
-    camera_index = view_idx // num_worlds
+    world_index = view_idx % world_count
+    camera_index = view_idx // world_count
 
     py = pixel_idx // width
     px = pixel_idx % width
@@ -74,14 +67,14 @@ def tid_to_coord_pixel_priority(tid: wp.int32, num_worlds: wp.int32, num_cameras
 
 
 @wp.func
-def tid_to_coord_view_priority(tid: wp.int32, num_cameras: wp.int32, width: wp.int32, height: wp.int32):
+def tid_to_coord_view_priority(tid: wp.int32, camera_count: wp.int32, width: wp.int32, height: wp.int32):
     num_pixels_per_view = width * height
 
     pixel_idx = tid % num_pixels_per_view
     view_idx = tid // num_pixels_per_view
 
-    world_index = view_idx // num_cameras
-    camera_index = view_idx % num_cameras
+    world_index = view_idx // camera_count
+    camera_index = view_idx % camera_count
 
     py = pixel_idx // width
     px = pixel_idx % width
@@ -101,11 +94,11 @@ def pack_rgba_to_uint32(rgb: wp.vec3f, alpha: wp.float32) -> wp.uint32:
 
 
 @wp.kernel(enable_backward=False)
-def _render_megakernel(
+def render_megakernel(
     # Model and Options
-    num_worlds: wp.int32,
-    num_cameras: wp.int32,
-    num_lights: wp.int32,
+    world_count: wp.int32,
+    camera_count: wp.int32,
+    light_count: wp.int32,
     img_width: wp.int32,
     img_height: wp.int32,
     render_order: wp.int32,
@@ -179,12 +172,12 @@ def _render_megakernel(
     tid = wp.tid()
 
     if render_order == RenderOrder.PIXEL_PRIORITY:
-        world_index, camera_index, py, px = tid_to_coord_pixel_priority(tid, num_worlds, num_cameras, img_width)
+        world_index, camera_index, py, px = tid_to_coord_pixel_priority(tid, world_count, camera_count, img_width)
     elif render_order == RenderOrder.VIEW_PRIORITY:
-        world_index, camera_index, py, px = tid_to_coord_view_priority(tid, num_cameras, img_width, img_height)
+        world_index, camera_index, py, px = tid_to_coord_view_priority(tid, camera_count, img_width, img_height)
     elif render_order == RenderOrder.TILED:
         world_index, camera_index, py, px = tid_to_coord_tiled(
-            tid, num_cameras, img_width, img_height, tile_width, tile_height
+            tid, camera_count, img_width, img_height, tile_width, tile_height
         )
     else:
         return
@@ -193,7 +186,7 @@ def _render_megakernel(
         return
 
     pixels_per_camera = img_width * img_height
-    pixels_per_world = num_cameras * pixels_per_camera
+    pixels_per_world = camera_count * pixels_per_camera
     out_index = world_index * pixels_per_world + camera_index * pixels_per_camera + py * img_width + px
 
     ray_origin_world = wp.transform_point(
@@ -310,7 +303,7 @@ def _render_megakernel(
         )
 
     # Apply lighting and shadows
-    for light_index in range(num_lights):
+    for light_index in range(light_count):
         light_contribution = lighting.compute_lighting(
             enable_shadows,
             enable_particles,
@@ -344,107 +337,3 @@ def _render_megakernel(
 
     out_color = wp.min(wp.max(out_color, wp.vec3f(0.0)), wp.vec3f(1.0))
     out_pixels[out_index] = pack_rgba_to_uint32(out_color, 1.0)
-
-
-def render_megakernel(
-    rc: RenderContext,
-    width: int,
-    height: int,
-    num_cameras: int,
-    camera_transforms: wp.array(dtype=wp.transformf, ndim=2),
-    camera_rays: wp.array(dtype=wp.vec3f, ndim=4),
-    color_image: wp.array(dtype=wp.uint32, ndim=4) | None,
-    depth_image: wp.array(dtype=wp.float32, ndim=4) | None,
-    shape_index_image: wp.array(dtype=wp.uint32, ndim=4) | None,
-    normal_image: wp.array(dtype=wp.vec3f, ndim=4) | None,
-    albedo_image: wp.array(dtype=wp.uint32, ndim=4) | None,
-):
-    # Reshaping output images to one dimension, slightly improves performance in the Kernel.
-    if color_image is not None:
-        color_image = color_image.reshape(rc.num_worlds * num_cameras * width * height)
-    if depth_image is not None:
-        depth_image = depth_image.reshape(rc.num_worlds * num_cameras * width * height)
-    if shape_index_image is not None:
-        shape_index_image = shape_index_image.reshape(rc.num_worlds * num_cameras * width * height)
-    if normal_image is not None:
-        normal_image = normal_image.reshape(rc.num_worlds * num_cameras * width * height)
-    if albedo_image is not None:
-        albedo_image = albedo_image.reshape(rc.num_worlds * num_cameras * width * height)
-
-    wp.launch(
-        kernel=_render_megakernel,
-        dim=(rc.num_worlds * num_cameras * width * height),
-        inputs=[
-            # Model and Options
-            rc.num_worlds,
-            num_cameras,
-            rc.num_lights,
-            width,
-            height,
-            rc.options.render_order,
-            rc.options.tile_width,
-            rc.options.tile_height,
-            rc.options.enable_shadows,
-            rc.options.enable_textures,
-            rc.options.enable_ambient_lighting,
-            rc.options.enable_particles and rc.has_particles,
-            rc.options.enable_backface_culling,
-            rc.options.enable_global_world,
-            rc.options.max_distance,
-            # Camera
-            camera_rays,
-            camera_transforms,
-            # Shape BVH
-            rc.num_shapes_enabled,
-            rc.bvh_shapes.id if rc.bvh_shapes else 0,
-            rc.bvh_shapes_group_roots,
-            # Shapes
-            rc.shape_enabled,
-            rc.shape_types,
-            rc.shape_mesh_indices,
-            rc.shape_materials,
-            rc.shape_sizes,
-            rc.shape_colors,
-            rc.shape_transforms,
-            # Meshes
-            rc.mesh_ids,
-            rc.mesh_face_offsets,
-            rc.mesh_face_vertices,
-            rc.mesh_texcoord,
-            rc.mesh_texcoord_offsets,
-            # Particle BVH
-            rc.num_particles_total,
-            rc.bvh_particles.id if rc.bvh_particles else 0,
-            rc.bvh_particles_group_roots,
-            # Particles
-            rc.particles_position,
-            rc.particles_radius,
-            # Triangle Mesh
-            rc.triangle_mesh.id if rc.triangle_mesh is not None else 0,
-            # Textures
-            rc.material_texture_ids,
-            rc.material_texture_repeat,
-            rc.material_rgba,
-            rc.texture_offsets,
-            rc.texture_data,
-            rc.texture_height,
-            rc.texture_width,
-            # Lights
-            rc.lights_active,
-            rc.lights_type,
-            rc.lights_cast_shadow,
-            rc.lights_position,
-            rc.lights_orientation,
-            # Outputs
-            color_image is not None,
-            depth_image is not None,
-            shape_index_image is not None,
-            normal_image is not None,
-            albedo_image is not None,
-            color_image,
-            depth_image,
-            shape_index_image,
-            normal_image,
-            albedo_image,
-        ],
-    )

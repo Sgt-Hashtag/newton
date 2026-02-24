@@ -60,6 +60,7 @@ from newton._src.usd.schemas import (
     SchemaResolverNewton,
     SchemaResolverPhysx,
 )
+from newton.solvers import SolverMuJoCo
 from newton.tests.unittest_utils import USD_AVAILABLE
 
 AttributeFrequency = Model.AttributeFrequency
@@ -147,7 +148,7 @@ class TestSchemaResolver(unittest.TestCase):
         builder = ModelBuilder()
         builder.add_usd(
             source=str(ant_mixed_path),
-            schema_resolvers=[SchemaResolverNewton(), SchemaResolverMjc()],  # nothing should be found
+            schema_resolvers=[SchemaResolverNewton()],  # nothing should be found
             verbose=False,
         )
         armature_values_found = []
@@ -412,6 +413,7 @@ class TestSchemaResolver(unittest.TestCase):
 
         # Import with two different schema priorities
         builder_newton = ModelBuilder()
+        SolverMuJoCo.register_custom_attributes(builder_newton)
         builder_newton.add_usd(
             source=str(dst),
             schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx(), SchemaResolverMjc()],
@@ -419,6 +421,7 @@ class TestSchemaResolver(unittest.TestCase):
         )
 
         builder_mjc = ModelBuilder()
+        SolverMuJoCo.register_custom_attributes(builder_mjc)
         builder_mjc.add_usd(
             source=str(dst),
             schema_resolvers=[SchemaResolverMjc(), SchemaResolverNewton(), SchemaResolverPhysx()],
@@ -451,7 +454,7 @@ class TestSchemaResolver(unittest.TestCase):
         builder = ModelBuilder()
         result = builder.add_usd(
             source=str(dst),
-            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx(), SchemaResolverMjc()],
+            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx()],
             verbose=False,
         )
 
@@ -537,14 +540,14 @@ class TestSchemaResolver(unittest.TestCase):
         # Joint custom property materialization and defaults
         self.assertEqual(model.get_attribute_frequency("testJointScalar"), AttributeFrequency.JOINT)
         # Authored joint value
-        self.assertIn(joint_name, builder.joint_key)
-        joint_idx = builder.joint_key.index(joint_name)
+        self.assertIn(joint_name, builder.joint_label)
+        joint_idx = builder.joint_label.index(joint_name)
         joint_arr = model.testJointScalar.numpy()
         self.assertAlmostEqual(float(joint_arr[joint_idx]), 2.25, places=6)
         # Non-authored joint should be default 0.0
         other_joint = "/ant/joints/front_right_leg"
-        self.assertIn(other_joint, builder.joint_key)
-        other_joint_idx = builder.joint_key.index(other_joint)
+        self.assertIn(other_joint, builder.joint_label)
+        other_joint_idx = builder.joint_label.index(other_joint)
         self.assertAlmostEqual(float(joint_arr[other_joint_idx]), 0.0, places=6)
 
         # Validate vec2 and quat custom properties are materialized with expected shapes
@@ -615,7 +618,7 @@ class TestSchemaResolver(unittest.TestCase):
         builder = ModelBuilder()
         result = builder.add_usd(
             source=str(usd_path),
-            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx(), SchemaResolverMjc()],
+            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx()],
             verbose=False,
         )
 
@@ -737,7 +740,7 @@ class TestSchemaResolver(unittest.TestCase):
         builder = ModelBuilder()
         builder.add_usd(
             source=str(usd_path),
-            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx(), SchemaResolverMjc()],
+            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx()],
             verbose=False,
         )
 
@@ -771,8 +774,8 @@ class TestSchemaResolver(unittest.TestCase):
         for i in range(model.joint_count):
             joint_type = joint_types[i]
             if joint_type == 1:  # JointType.REVOLUTE
-                joint_key = builder.joint_key[i] if i < len(builder.joint_key) else None
-                if joint_key not in expected_joint_values:
+                joint_label = builder.joint_label[i] if i < len(builder.joint_label) else None
+                if joint_label not in expected_joint_values:
                     continue
 
                 q_start = int(joint_q_start[i])
@@ -781,20 +784,20 @@ class TestSchemaResolver(unittest.TestCase):
                 actual_pos = joint_q[q_start]
                 actual_vel = joint_qd[qd_start]
 
-                expected_pos_deg, expected_vel = expected_joint_values[joint_key]
+                expected_pos_deg, expected_vel = expected_joint_values[joint_label]
                 expected_pos_rad = expected_pos_deg * (3.14159 / 180.0)
 
                 self.assertAlmostEqual(
                     actual_pos,
                     expected_pos_rad,
                     places=4,
-                    msg=f"Joint {joint_key} position mismatch: expected {expected_pos_deg}°, got {actual_pos * 180 / 3.14159:.1f}°",
+                    msg=f"Joint {joint_label} position mismatch: expected {expected_pos_deg}°, got {actual_pos * 180 / 3.14159:.1f}°",
                 )
                 self.assertAlmostEqual(
                     actual_vel,
                     expected_vel,
                     places=4,
-                    msg=f"Joint {joint_key} velocity mismatch: expected {expected_vel}, got {actual_vel}",
+                    msg=f"Joint {joint_label} velocity mismatch: expected {expected_vel}, got {actual_vel}",
                 )
                 revolute_joints_found += 1
 
@@ -820,7 +823,7 @@ class TestSchemaResolver(unittest.TestCase):
         builder = ModelBuilder()
         builder.add_usd(
             source=str(humanoid_path),
-            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx(), SchemaResolverMjc()],
+            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx()],
             verbose=False,
         )
 
@@ -948,7 +951,7 @@ class TestSchemaResolver(unittest.TestCase):
         builder = ModelBuilder()
         builder.add_usd(
             source=str(humanoid_path),
-            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx(), SchemaResolverMjc()],
+            schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx()],
             verbose=False,
         )
 
@@ -1072,6 +1075,7 @@ class TestSchemaResolver(unittest.TestCase):
 
         # Test with all three plugins to ensure attribute collection works
         builder = ModelBuilder()
+        SolverMuJoCo.register_custom_attributes(builder)
         result = builder.add_usd(
             source=str(ant_mixed_path),
             schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx(), SchemaResolverMjc()],
@@ -1123,6 +1127,7 @@ class TestSchemaResolver(unittest.TestCase):
         self.assertTrue(ant_mixed_path.exists(), f"Missing mixed USD: {ant_mixed_path}")
 
         builder = ModelBuilder()
+        SolverMuJoCo.register_custom_attributes(builder)
         result = builder.add_usd(
             source=str(ant_mixed_path),
             schema_resolvers=[SchemaResolverNewton(), SchemaResolverPhysx(), SchemaResolverMjc()],
@@ -1139,8 +1144,8 @@ class TestSchemaResolver(unittest.TestCase):
         body_idx = body_map[body_path]
 
         joint_name = "/ant/joints/front_left_leg"
-        self.assertIn(joint_name, builder.joint_key)
-        joint_idx = builder.joint_key.index(joint_name)
+        self.assertIn(joint_name, builder.joint_label)
+        joint_idx = builder.joint_label.index(joint_name)
 
         # Test 1: Verify that testBodyScalar exists in both default and namespace_a
         # Default namespace: newton:testBodyScalar = 1.5 (model assignment)
@@ -1328,6 +1333,7 @@ class TestSchemaResolver(unittest.TestCase):
 
         # mjc:margin is available instead via custom solver attributes
         builder = ModelBuilder()
+        SolverMuJoCo.register_custom_attributes(builder)
         result = builder.add_usd(
             source=stage,
             schema_resolvers=[SchemaResolverMjc(), SchemaResolverNewton()],
@@ -1384,7 +1390,7 @@ class TestSchemaResolver(unittest.TestCase):
 
     def test_material_friction_attributes(self):
         """
-        Test rolling_friction and torsional_friction priority on materials.
+        Test mu_rolling and mu_torsional priority on materials.
         """
 
         stage = Usd.Stage.CreateInMemory()
@@ -1397,16 +1403,16 @@ class TestSchemaResolver(unittest.TestCase):
         resolver = SchemaResolverManager([SchemaResolverNewton()])
 
         # there is no authored value, so it should return the default (0)
-        rolling = resolver.get_value(material, PrimType.MATERIAL, "rolling_friction")
-        torsional = resolver.get_value(material, PrimType.MATERIAL, "torsional_friction")
+        rolling = resolver.get_value(material, PrimType.MATERIAL, "mu_rolling")
+        torsional = resolver.get_value(material, PrimType.MATERIAL, "mu_torsional")
         self.assertEqual(rolling, 0.0005)
         self.assertEqual(torsional, 0.25)
 
         # an explicit newton value should be used
         material.GetAttribute("newton:rollingFriction").Set(0.1)
         material.GetAttribute("newton:torsionalFriction").Set(0.2)
-        rolling = resolver.get_value(material, PrimType.MATERIAL, "rolling_friction")
-        torsional = resolver.get_value(material, PrimType.MATERIAL, "torsional_friction")
+        rolling = resolver.get_value(material, PrimType.MATERIAL, "mu_rolling")
+        torsional = resolver.get_value(material, PrimType.MATERIAL, "mu_torsional")
         self.assertAlmostEqual(rolling, 0.1)
         self.assertAlmostEqual(torsional, 0.2)
 
@@ -1414,22 +1420,22 @@ class TestSchemaResolver(unittest.TestCase):
         resolver = SchemaResolverManager([SchemaResolverMjc(), SchemaResolverNewton()])
         material.CreateAttribute("mjc:rollingfriction", Sdf.ValueTypeNames.Float).Set(0.3)
         material.CreateAttribute("mjc:torsionalfriction", Sdf.ValueTypeNames.Float).Set(0.4)
-        rolling = resolver.get_value(material, PrimType.MATERIAL, "rolling_friction")
-        torsional = resolver.get_value(material, PrimType.MATERIAL, "torsional_friction")
+        rolling = resolver.get_value(material, PrimType.MATERIAL, "mu_rolling")
+        torsional = resolver.get_value(material, PrimType.MATERIAL, "mu_torsional")
         self.assertAlmostEqual(rolling, 0.3)
         self.assertAlmostEqual(torsional, 0.4)
 
         # with mujoco lower priority, newton values should be used
         resolver = SchemaResolverManager([SchemaResolverNewton(), SchemaResolverMjc()])
-        rolling = resolver.get_value(material, PrimType.MATERIAL, "rolling_friction")
-        torsional = resolver.get_value(material, PrimType.MATERIAL, "torsional_friction")
+        rolling = resolver.get_value(material, PrimType.MATERIAL, "mu_rolling")
+        torsional = resolver.get_value(material, PrimType.MATERIAL, "mu_torsional")
         self.assertAlmostEqual(rolling, 0.1)
         self.assertAlmostEqual(torsional, 0.2)
 
         # physx does not have these attributes, so newton values should still be used
         resolver = SchemaResolverManager([SchemaResolverPhysx(), SchemaResolverNewton()])
-        rolling = resolver.get_value(material, PrimType.MATERIAL, "rolling_friction")
-        torsional = resolver.get_value(material, PrimType.MATERIAL, "torsional_friction")
+        rolling = resolver.get_value(material, PrimType.MATERIAL, "mu_rolling")
+        torsional = resolver.get_value(material, PrimType.MATERIAL, "mu_torsional")
         self.assertAlmostEqual(rolling, 0.1)
         self.assertAlmostEqual(torsional, 0.2)
 
