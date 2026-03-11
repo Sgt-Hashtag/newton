@@ -60,15 +60,15 @@ class Example:
 
         # parse the URDF file
         quadruped.add_urdf(
-            newton.examples.get_asset("a1_description/urdf/robot_newton.urdf"),
+            newton.examples.get_asset("a1_description/urdf/robot.urdf"),
             xform=wp.transform(wp.vec3(0.0, 0.0, 0.7), wp.quat_identity()),
             floating=True,
             enable_self_collisions=False,
-            ignore_inertial_definitions=True,  # Use geometry-based inertia for stability
+            ignore_inertial_definitions=False,  # Use geometry-based inertia for stability
         )
 
         # set initial joint positions
-        quadruped.joint_q[-12:] = [0.2, 0.4, -0.6, -0.2, -0.4, 0.6, -0.2, 0.4, -0.6, 0.2, -0.4, 0.6]
+        quadruped.joint_q[-12:] = [0.1, 0.8, -1.5, -0.1, 0.8, -1.5, 0.1, 1.0, -1.5, -0.1, 1.0, -1.5]
         quadruped.joint_target_pos[-12:] = quadruped.joint_q[-12:]
 
         # use "scene" for the entire set of worlds
